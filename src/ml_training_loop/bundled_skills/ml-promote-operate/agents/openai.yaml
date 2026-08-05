@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Promotion and Operations"
+  short_description: "Package deploy monitor and roll back models"
+  default_prompt: "Use $ml-promote-operate to produce, validate, deploy, monitor, or roll back this model safely."

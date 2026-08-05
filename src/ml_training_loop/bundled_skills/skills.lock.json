@@ -1,0 +1,37 @@
+{
+  "schema": "ml-training-loop-skills-lock-v1",
+  "skills": [
+    {
+      "name": "ml-audit-data-labels",
+      "sha256": "8eabd903bbd7b10432a0f70e898773723866c890651fa429f826ce021521d7b9"
+    },
+    {
+      "name": "ml-design-experiment",
+      "sha256": "6dcbfad87bde9f9e747f2a326ab0726d4cce21c7fa9adaeb02873b3a745698b6"
+    },
+    {
+      "name": "ml-diagnose-experiment",
+      "sha256": "ed473eb88eebf32e54867d1ad3b16812fdfb5c6fd2066c66296fd725185b926c"
+    },
+    {
+      "name": "ml-promote-operate",
+      "sha256": "61a0c92441c6dde70af8ef08b17f4883ed104114e6236f9435a99d8221b2f747"
+    },
+    {
+      "name": "ml-rigor-workflow",
+      "sha256": "2e714b43fa1e0594bbd91c0b158ffe5e3082e364d61af00d54b3840bcd2bf3c0"
+    },
+    {
+      "name": "ml-train-representation",
+      "sha256": "f054ed3d555b11d4d4ba9ab62a393b70c578b323b31235400a85fe61b5ad01d5"
+    },
+    {
+      "name": "ml-train-select-model",
+      "sha256": "cd9676f8b0ffd472a0705d44e3cc54cc8c1cb68c5eb9f731f370a3d86366e2c0"
+    },
+    {
+      "name": "ml-validate-temporal",
+      "sha256": "1c16fd6287f65031319b2ee72393ed929f6a5a237187620b6de73a4b4772c91e"
+    }
+  ]
+}

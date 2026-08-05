@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Training and Selection"
+  short_description: "Train and select models without leakage"
+  default_prompt: "Use $ml-train-select-model to train, calibrate, and select this model with fold-safe evidence."

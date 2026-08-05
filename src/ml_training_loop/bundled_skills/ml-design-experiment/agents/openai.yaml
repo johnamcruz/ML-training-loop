@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Experiment Design"
+  short_description: "Freeze a falsifiable ML research contract"
+  default_prompt: "Use $ml-design-experiment to define the smallest falsifiable experiment and freeze its evidence contract."

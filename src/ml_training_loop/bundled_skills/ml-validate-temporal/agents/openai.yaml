@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Temporal Validation"
+  short_description: "Run temporal OOS and economic validation"
+  default_prompt: "Use $ml-validate-temporal to evaluate this frozen candidate with chronological OOS controls and economics."

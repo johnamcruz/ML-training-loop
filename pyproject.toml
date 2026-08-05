@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ml-training-loop"
+version = "0.1.0"
+description = "Reusable, evidence-driven training loops for supervised and reinforcement learning."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "John A. M. Cruz" }]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+ml-training-loop = "ml_training_loop.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ml_training_loop"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

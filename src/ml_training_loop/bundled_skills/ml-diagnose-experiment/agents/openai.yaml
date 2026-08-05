@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Experiment Diagnosis"
+  short_description: "Locate ML failures at the first bad boundary"
+  default_prompt: "Use $ml-diagnose-experiment to find the first failed ML evidence boundary and recommend one repair."

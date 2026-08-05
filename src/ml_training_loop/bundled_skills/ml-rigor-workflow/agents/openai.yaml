@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Rigor Workflow"
+  short_description: "Route ML work through evidence gates"
+  default_prompt: "Use $ml-rigor-workflow to route this model-development task through the correct evidence gates."

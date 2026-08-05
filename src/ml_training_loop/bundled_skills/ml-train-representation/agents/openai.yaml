@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Representation Training"
+  short_description: "Train SSL and foundation checkpoints safely"
+  default_prompt: "Use $ml-train-representation to design and validate this SSL or foundation-checkpoint training stage."

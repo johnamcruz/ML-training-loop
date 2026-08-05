@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Data and Label Audit"
+  short_description: "Audit causal data labels and caches"
+  default_prompt: "Use $ml-audit-data-labels to verify data lineage, causal labels, timing, and cache identity before training."
