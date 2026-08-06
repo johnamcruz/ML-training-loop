@@ -8,6 +8,7 @@ from ml_training_loop import (
     Decision,
     GateResult,
     Phase,
+    ReasoningOutcome,
     Revision,
     StageReceipt,
     StageSpec,
@@ -159,6 +160,81 @@ class TrainingLoopTests(unittest.TestCase):
             "ml-diagnose-experiment",
             "ml-design-experiment",
         ))
+
+    def test_reasoning_adapter_failure_blocks_instead_of_crashing(self):
+        class BrokenReasoner:
+            def revise(self, request):
+                raise RuntimeError("Codex response was malformed")
+
+        events = []
+        loop = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": ScoreStage(events, [0.4])},
+                gates={"quality": ThresholdGate(events)},
+            ),
+            store=InMemoryRunStore(),
+            skills=RecordingSkills(events),
+            reasoning=BrokenReasoner(),
+        )
+
+        result = loop.run(plan(StageSpec("train", "fit", "quality")), "run-bad-reasoning")
+
+        self.assertEqual(result.phase, Phase.BLOCKED)
+        self.assertIn("reasoning adapter failed", result.message)
+
+    def test_reasoning_decline_stops_and_is_persisted(self):
+        class DecliningReasoner:
+            def revise(self, request):
+                return None
+
+        events = []
+        store = InMemoryRunStore()
+        loop = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": ScoreStage(events, [0.4])},
+                gates={"quality": ThresholdGate(events)},
+            ),
+            store=store,
+            skills=RecordingSkills(events),
+            reasoning=DecliningReasoner(),
+        )
+
+        result = loop.run(plan(StageSpec("train", "fit", "quality")), "run-declined")
+
+        self.assertEqual(result.phase, Phase.STOPPED)
+        self.assertEqual(store.load("run-declined"), result)
+        self.assertIn("declined", result.message)
+
+    def test_reasoning_blocker_is_distinct_from_scientific_stop(self):
+        class DispositionReasoner:
+            def __init__(self, decision):
+                self.decision = decision
+
+            def revise(self, request):
+                return ReasoningOutcome(
+                    decision=self.decision,
+                    rationale=f"reasoning chose {self.decision.value}",
+                )
+
+        for decision, phase in (
+            (Decision.STOP, Phase.STOPPED),
+            (Decision.BLOCKED, Phase.BLOCKED),
+        ):
+            with self.subTest(decision=decision):
+                events = []
+                result = TrainingLoop(
+                    adapters=DictAdapterRegistry(
+                        stages={"fit": ScoreStage(events, [0.4])},
+                        gates={"quality": ThresholdGate(events)},
+                    ),
+                    store=InMemoryRunStore(),
+                    skills=RecordingSkills(events),
+                    reasoning=DispositionReasoner(decision),
+                ).run(
+                    plan(StageSpec("train", "fit", "quality")),
+                    f"reasoning-{decision.value.lower()}",
+                )
+                self.assertEqual(result.phase, phase)
 
     def test_reasoning_checkpoint_resumes_without_repeating_completed_attempt(self):
         events = []
