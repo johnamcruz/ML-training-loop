@@ -9,6 +9,7 @@ from ml_training_loop import (
     GateResult,
     Phase,
     ReasoningOutcome,
+    RetryableInfrastructureError,
     Revision,
     RunState,
     StageReceipt,
@@ -98,6 +99,166 @@ def plan(*stages, revisions=1):
 
 
 class TrainingLoopTests(unittest.TestCase):
+    def test_retryable_infrastructure_failure_retries_without_new_attempt(self):
+        class TransientStage:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, request):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RetryableInfrastructureError("temporary SSD disconnect")
+                return StageReceipt(
+                    stage=request.stage.name,
+                    attempt=request.attempt,
+                    status="complete",
+                    outputs={"score": 0.9},
+                )
+
+        events = []
+        stage = TransientStage()
+        result = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": stage}, gates={"quality": ThresholdGate(events)}
+            ),
+            store=InMemoryRunStore(),
+            skills=RecordingSkills(events),
+        ).run(plan(StageSpec("train", "fit", "quality")), "retry-run")
+
+        self.assertEqual(result.phase, Phase.COMPLETE)
+        self.assertEqual(stage.calls, 2)
+        self.assertEqual(result.attempts, {"train": 1})
+        self.assertEqual(len(result.receipts), 1)
+
+    def test_untyped_stage_failure_is_not_retried(self):
+        class BrokenStage:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, request):
+                self.calls += 1
+                raise RuntimeError("invalid training contract")
+
+        events = []
+        stage = BrokenStage()
+        result = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": stage}, gates={"quality": ThresholdGate(events)}
+            ),
+            store=InMemoryRunStore(),
+            skills=RecordingSkills(events),
+        ).run(plan(StageSpec("train", "fit", "quality")), "no-retry-run")
+
+        self.assertEqual(result.phase, Phase.BLOCKED)
+        self.assertEqual(stage.calls, 1)
+
+    def test_history_and_recovery_resume_after_execute_without_repeating_stage(self):
+        events = []
+        stage = ScoreStage(events, [0.9])
+        store = InMemoryRunStore()
+        training_plan = plan(StageSpec("train", "fit", "quality"))
+        loop = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": stage}, gates={"quality": ThresholdGate(events)}
+            ),
+            store=store,
+            skills=RecordingSkills(events),
+        )
+        completed = loop.run(training_plan, "recovery-run")
+        self.assertEqual(completed.phase, Phase.COMPLETE)
+
+        history = loop.history("recovery-run")
+        validating = next(
+            checkpoint
+            for checkpoint in history
+            if checkpoint.state.phase is Phase.VALIDATING
+            and checkpoint.next_nodes == ("validate",)
+        )
+        recovered = loop.recover(
+            training_plan,
+            "recovery-run",
+            validating.checkpoint_id,
+        )
+
+        self.assertEqual(recovered.phase, Phase.COMPLETE)
+        self.assertEqual(len(stage.requests), 1)
+        self.assertEqual(
+            [checkpoint.created_at for checkpoint in history],
+            sorted(checkpoint.created_at for checkpoint in history),
+        )
+
+    def test_json_history_and_recovery_survive_process_reconstruction(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            events = []
+            stage = ScoreStage(events, [0.9])
+            adapters = DictAdapterRegistry(
+                stages={"fit": stage}, gates={"quality": ThresholdGate(events)}
+            )
+            training_plan = plan(StageSpec("train", "fit", "quality"))
+            first = TrainingLoop(
+                adapters=adapters,
+                store=JsonRunStore(root),
+                skills=RecordingSkills(events),
+            )
+            self.assertEqual(
+                first.run(training_plan, "durable-recovery").phase,
+                Phase.COMPLETE,
+            )
+            checkpoint_id = next(
+                item.checkpoint_id
+                for item in first.history("durable-recovery")
+                if item.state.phase is Phase.VALIDATING
+                and item.next_nodes == ("validate",)
+            )
+
+            reconstructed = TrainingLoop(
+                adapters=adapters,
+                store=JsonRunStore(root),
+                skills=RecordingSkills(events),
+            )
+            recovered = reconstructed.recover(
+                training_plan,
+                "durable-recovery",
+                checkpoint_id,
+            )
+
+            self.assertEqual(recovered.phase, Phase.COMPLETE)
+            self.assertEqual(len(stage.requests), 1)
+
+    def test_recovery_from_reasoning_interrupt_uses_the_reasoning_adapter(self):
+        events = []
+        stage = ScoreStage(events, [0.4, 0.9])
+        store = InMemoryRunStore()
+        adapters = DictAdapterRegistry(
+            stages={"fit": stage}, gates={"quality": ThresholdGate(events)}
+        )
+        training_plan = plan(StageSpec("train", "fit", "quality"))
+        paused_loop = TrainingLoop(
+            adapters=adapters,
+            store=store,
+            skills=RecordingSkills(events),
+        )
+        self.assertEqual(
+            paused_loop.run(training_plan, "reasoning-recovery").phase,
+            Phase.NEEDS_REASONING,
+        )
+        checkpoint_id = next(
+            item.checkpoint_id
+            for item in reversed(paused_loop.history("reasoning-recovery"))
+            if item.state.phase is Phase.NEEDS_REASONING
+        )
+
+        recovered = TrainingLoop(
+            adapters=adapters,
+            store=store,
+            skills=RecordingSkills(events),
+            reasoning=OneRevisionReasoner(),
+        ).recover(training_plan, "reasoning-recovery", checkpoint_id)
+
+        self.assertEqual(recovered.phase, Phase.COMPLETE)
+        self.assertEqual([request.attempt for request in stage.requests], [1, 2])
+
     def test_installs_foundation_skills_before_executing_stages(self):
         events = []
         skills = RecordingSkills(events)

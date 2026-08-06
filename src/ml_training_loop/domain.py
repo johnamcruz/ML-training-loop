@@ -26,6 +26,14 @@ class Phase(StrEnum):
     BLOCKED = "BLOCKED"
 
 
+class RetryableInfrastructureError(RuntimeError):
+    """A transient infrastructure fault safe to retry within one ML attempt.
+
+    Adapters must raise this type deliberately. Scientific, data, contract, and
+    ordinary runtime failures remain fail-closed and are never retried.
+    """
+
+
 @dataclass(frozen=True)
 class StageSpec:
     """One declared action and the adapter names used at its seams."""
@@ -162,3 +170,13 @@ class RunState:
             Phase.STOPPED,
             Phase.BLOCKED,
         }
+
+
+@dataclass(frozen=True)
+class RunCheckpoint:
+    """Read-only view of one durable LangGraph execution checkpoint."""
+
+    checkpoint_id: str
+    created_at: str
+    next_nodes: tuple[str, ...]
+    state: RunState
