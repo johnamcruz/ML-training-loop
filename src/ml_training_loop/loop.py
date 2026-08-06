@@ -5,7 +5,15 @@ from dataclasses import replace
 from typing import Mapping
 from uuid import uuid4
 
-from .domain import Decision, Phase, Revision, RunState, StageReceipt, TrainingPlan
+from .domain import (
+    Decision,
+    Phase,
+    ReasoningOutcome,
+    Revision,
+    RunState,
+    StageReceipt,
+    TrainingPlan,
+)
 from .interfaces import (
     AdapterRegistry,
     GateRequest,
@@ -202,26 +210,58 @@ class TrainingLoop:
             )
         if self._reasoning is None:
             return state
-        revision = self._reasoning.revise(
-            ReasoningRequest(
-                run_id=state.run_id,
-                plan=plan,
-                stage=stage,
-                receipt=receipt,
-                gate=gate,
-                revision_number=revisions + 1,
-                required_skills=tuple(dict.fromkeys((
-                    "ml-rigor-workflow",
-                    "ml-diagnose-experiment",
-                    "ml-design-experiment",
-                    *stage.required_skills,
-                ))),
+        try:
+            reasoned = self._reasoning.revise(
+                ReasoningRequest(
+                    run_id=state.run_id,
+                    plan=plan,
+                    stage=stage,
+                    receipt=receipt,
+                    gate=gate,
+                    revision_number=revisions + 1,
+                    required_skills=tuple(dict.fromkeys((
+                        "ml-rigor-workflow",
+                        "ml-diagnose-experiment",
+                        "ml-design-experiment",
+                        *stage.required_skills,
+                    ))),
+                    prior_revisions=state.revisions,
+                    effective_config_override=self._override_for(
+                        state.revisions, stage.name
+                    ),
+                )
             )
-        )
-        if revision is None:
-            return replace(
+        except Exception as error:
+            return self._finish(
                 state,
-                message="reasoning adapter did not authorize a revision",
+                Phase.BLOCKED,
+                f"reasoning adapter failed: {type(error).__name__}: {error}",
+            )
+        if reasoned is None:
+            return self._finish(
+                state,
+                Phase.STOPPED,
+                "reasoning adapter declined a further revision",
+            )
+        if isinstance(reasoned, ReasoningOutcome):
+            if reasoned.decision is Decision.STOP:
+                return self._finish(state, Phase.STOPPED, reasoned.rationale)
+            if reasoned.decision is Decision.BLOCKED:
+                return self._finish(state, Phase.BLOCKED, reasoned.rationale)
+            revision = reasoned.revision
+            if revision is None:
+                return self._finish(
+                    state,
+                    Phase.BLOCKED,
+                    "REVISE reasoning outcome omitted its revision",
+                )
+        elif isinstance(reasoned, Revision):
+            revision = reasoned
+        else:
+            return self._finish(
+                state,
+                Phase.BLOCKED,
+                "reasoning adapter returned an unsupported outcome",
             )
         if revision.stage != stage.name:
             return self._finish(

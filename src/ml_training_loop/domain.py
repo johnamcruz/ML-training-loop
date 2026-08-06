@@ -108,6 +108,24 @@ class Revision:
 
 
 @dataclass(frozen=True)
+class ReasoningOutcome:
+    """One terminal disposition from a bounded reasoning checkpoint."""
+
+    decision: Decision
+    rationale: str
+    revision: Revision | None = None
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.decision not in {Decision.REVISE, Decision.STOP, Decision.BLOCKED}:
+            raise ValueError("reasoning outcome must REVISE, STOP, or BLOCK")
+        if not self.rationale:
+            raise ValueError("reasoning outcome requires a rationale")
+        if (self.decision is Decision.REVISE) != (self.revision is not None):
+            raise ValueError("only a REVISE outcome may contain a revision")
+
+
+@dataclass(frozen=True)
 class SkillStatus:
     name: str
     status: str

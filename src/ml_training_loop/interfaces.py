@@ -1,11 +1,12 @@
 """Replaceable interfaces at the training loop's external seams."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from .domain import (
     GateResult,
+    ReasoningOutcome,
     Revision,
     RunState,
     SkillBootstrapReceipt,
@@ -43,6 +44,8 @@ class ReasoningRequest:
     gate: GateResult
     revision_number: int
     required_skills: tuple[str, ...]
+    prior_revisions: tuple[Revision, ...] = ()
+    effective_config_override: Mapping[str, Any] = field(default_factory=dict)
 
 
 class StageAdapter(Protocol):
@@ -54,7 +57,9 @@ class GateAdapter(Protocol):
 
 
 class ReasoningAdapter(Protocol):
-    def revise(self, request: ReasoningRequest) -> Revision | None: ...
+    def revise(
+        self, request: ReasoningRequest
+    ) -> ReasoningOutcome | Revision | None: ...
 
 
 class SkillBootstrapper(Protocol):

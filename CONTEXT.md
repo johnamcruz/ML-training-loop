@@ -17,6 +17,8 @@ control flow and durable run state, not training algorithms.
   failed stage. It does not silently alter the frozen training plan.
 - **Reasoning checkpoint**: a pause after `REVISE` where an injected reasoning
   adapter may authorize one controlled revision.
+- **Reasoning outcome**: one provider-neutral `REVISE`, `STOP`, or `BLOCKED`
+  disposition. Only `REVISE` carries a host-validated configuration override.
 - **Run state**: the durable state-machine snapshot used to resume without
   repeating completed work.
 - **Profile**: a future host-owned assembly of adapters for a model family such

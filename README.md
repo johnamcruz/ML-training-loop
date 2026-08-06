@@ -66,6 +66,45 @@ The replaceable seams are `StageAdapter`, `GateAdapter`, `ReasoningAdapter`,
 model-specific decisions remain behind those seams. See [CONTEXT.md](CONTEXT.md)
 for the domain boundary.
 
+### Unattended Codex reasoning
+
+`CodexCliReasoningAdapter` is an optional adapter for campaigns that may revise
+without a human handoff. It sends the current identity-hashed receipt and
+failed-gate evidence to a schema-constrained Codex CLI run. The host supplies
+domain instructions and validates the returned configuration override before
+the state machine executes it. Every request, execution, response, and
+authorization is retained as a durable receipt.
+
+```python
+from ml_training_loop.integrations import CodexCliReasoningAdapter
+
+reasoning = CodexCliReasoningAdapter(
+    repository_root=repository,
+    receipt_root=run_root / "reasoning",
+    prompt_builder=build_domain_revision_prompt,
+    revision_validator=validate_domain_revision,
+)
+```
+
+The optional integration defaults to `gpt-5.6-sol` with medium reasoning,
+read-only sandboxing, and one schema-constrained response. A host must supply a
+revision validator; prompt text is not treated as a safety policy. The training
+plan still owns the maximum revision count. A malformed response or failed
+Codex process fails closed as `BLOCKED`; declining a revision durably stops the
+run. Completed reasoning receipts are replayed on resume only when their request
+identity still matches.
+
+The structured reasoning result is provider-neutral: `REVISE` carries one
+validated configuration override, `STOP` ends a falsified scientific path, and
+`BLOCKED` identifies an integrity, causality, lineage, or executable-contract
+fault. A per-checkpoint process lock prevents duplicate provider calls, and a
+completed invocation is recovered before a provider call is repeated.
+
+`ClaudeCliReasoningAdapter` currently exists only as an explicit fail-closed
+stub. It records an `unavailable` receipt and authorizes no revision. Its real
+CLI invocation must not be enabled until the structured-output and sandbox
+contract is implemented and tested.
+
 ## Foundation skills
 
 The package carries a pinned, generic ML skill bundle. `TrainingLoop.run()`
