@@ -10,6 +10,7 @@ from ml_training_loop import (
     Phase,
     ReasoningOutcome,
     Revision,
+    RunState,
     StageReceipt,
     StageSpec,
     TrainingLoop,
@@ -373,6 +374,44 @@ class TrainingLoopTests(unittest.TestCase):
 
             self.assertEqual(resumed.phase, Phase.COMPLETE)
             self.assertEqual([request.attempt for request in stage.requests], [1, 2])
+
+    def test_pre_langgraph_json_state_migrates_without_repeating_completed_attempt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            training_plan = plan(StageSpec("train", "fit", "quality"))
+            JsonRunStore(root).save(RunState(
+                run_id="legacy-run",
+                plan_identity=training_plan.identity,
+                phase=Phase.NEEDS_REASONING,
+                attempts={"train": 1},
+                receipts=(StageReceipt(
+                    stage="train",
+                    attempt=1,
+                    status="complete",
+                    outputs={"score": 0.4},
+                ),),
+                last_gate=GateResult(
+                    decision=Decision.REVISE,
+                    reason="score too low",
+                    evidence={"score": 0.4},
+                ),
+                message="score too low",
+            ))
+            events = []
+            stage = ScoreStage(events, [0.9])
+
+            resumed = TrainingLoop(
+                adapters=DictAdapterRegistry(
+                    stages={"fit": stage},
+                    gates={"quality": ThresholdGate(events)},
+                ),
+                store=JsonRunStore(root),
+                skills=RecordingSkills(events),
+                reasoning=OneRevisionReasoner(),
+            ).run(training_plan, "legacy-run")
+
+            self.assertEqual(resumed.phase, Phase.COMPLETE)
+            self.assertEqual([request.attempt for request in stage.requests], [2])
 
     def test_run_id_cannot_resume_with_a_different_plan(self):
         events = []
