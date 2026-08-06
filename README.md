@@ -1,9 +1,9 @@
 # ML Training Loop
 
-A reusable, evidence-driven state machine for ML training. It coordinates
-execution, validation, diagnosis, one controlled revision at a time, retraining,
-and interruption-safe resume until the declared plan succeeds or reaches a
-genuine blocker.
+A reusable, evidence-driven ML training workflow built on LangGraph. It
+coordinates execution, validation, diagnosis, one controlled revision at a
+time, retraining, and interruption-safe resume until the declared plan succeeds
+or reaches a genuine blocker.
 
 The core is deliberately model-family independent. Supervised learning,
 reinforcement learning, representation learning, mechanical optimization, and
@@ -27,9 +27,10 @@ bootstrap required ML skills
  next stage   diagnose and authorize ---+
 ```
 
-`PROCEED`, `REVISE`, `STOP`, and `BLOCKED` are separate decisions. Completed
-stage receipts and state transitions are persisted so a resumed run does not
-repeat completed compute.
+`PROCEED`, `REVISE`, `STOP`, and `BLOCKED` are separate decisions. LangGraph
+owns graph execution, conditional routing, checkpoint/resume, and reasoning
+interrupts. Completed stage receipts retain their existing ML-specific format,
+while LangGraph checkpoints execution in SQLite for filesystem-backed runs.
 
 ## External interface
 

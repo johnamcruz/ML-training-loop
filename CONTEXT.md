@@ -1,7 +1,9 @@
 # Domain context
 
-ML Training Loop is a model-family-independent orchestration library. It owns
-control flow and durable run state, not training algorithms.
+ML Training Loop is a model-family-independent orchestration library. LangGraph
+owns graph execution, routing, checkpoints, resume, and interrupts. This
+package owns the ML-specific contracts and policies layered onto that runtime,
+not training algorithms.
 
 ## Ubiquitous language
 
@@ -27,10 +29,11 @@ control flow and durable run state, not training algorithms.
 
 ## Ownership boundary
 
-The core owns deterministic transitions, skill bootstrapping, receipts,
-revision budgets, and interruption-safe resume. Hosts own datasets, trainers,
-evaluators, model-specific metrics, compute environments, notifications, and
-promotion policy through adapters.
+The core owns skill bootstrapping, ML receipts, revision budgets, and the graph
+nodes that apply those policies. LangGraph owns transition execution,
+checkpointing, routing, and interruption-safe resume. Hosts own datasets,
+trainers, evaluators, model-specific metrics, compute environments,
+notifications, and promotion policy through adapters.
 
 The core must not import PyTorch, an RL framework, a data platform, or a model
 provider. A host may use any of them behind an adapter.

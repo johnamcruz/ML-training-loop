@@ -4,6 +4,10 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sqlite3
+
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from .domain import Decision, GateResult, Phase, Revision, RunState, StageReceipt
 
@@ -11,6 +15,7 @@ from .domain import Decision, GateResult, Phase, Revision, RunState, StageReceip
 class InMemoryRunStore:
     def __init__(self) -> None:
         self._states: dict[str, RunState] = {}
+        self._checkpointer = InMemorySaver()
 
     def load(self, run_id: str) -> RunState | None:
         return self._states.get(run_id)
@@ -18,12 +23,17 @@ class InMemoryRunStore:
     def save(self, state: RunState) -> None:
         self._states[state.run_id] = state
 
+    def _langgraph_checkpointer(self) -> InMemorySaver:
+        return self._checkpointer
+
 
 class JsonRunStore:
     """Atomic filesystem state suitable for interruption and resume."""
 
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
+        self._checkpointer: SqliteSaver | None = None
+        self._checkpoint_connection: sqlite3.Connection | None = None
 
     def load(self, run_id: str) -> RunState | None:
         path = self._path(run_id)
@@ -69,3 +79,19 @@ class JsonRunStore:
         if not run_id or any(character not in supported for character in run_id):
             raise ValueError("run id contains unsupported characters")
         return self._root / run_id / "state.json"
+
+    def _langgraph_checkpointer(self) -> SqliteSaver:
+        """Return the private durable runtime used by LangGraph.
+
+        ``state.json`` remains the stable ML-facing receipt/state format. The
+        SQLite database is LangGraph-owned execution state and is intentionally
+        not exposed through the public ``RunStore`` interface.
+        """
+        if self._checkpointer is None:
+            self._root.mkdir(parents=True, exist_ok=True)
+            self._checkpoint_connection = sqlite3.connect(
+                self._root / "langgraph-checkpoints.sqlite",
+                check_same_thread=False,
+            )
+            self._checkpointer = SqliteSaver(self._checkpoint_connection)
+        return self._checkpointer
