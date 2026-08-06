@@ -62,6 +62,24 @@ loop = TrainingLoop(
 state = loop.run(plan, run_id="experiment-001")
 ```
 
+`run()` uses synchronous LangGraph durability by default, so a successful graph
+step is checkpointed before the next step begins. Hosts do not need to change
+their call sites. Ordinary adapter failures continue to fail closed; an adapter
+may explicitly raise `RetryableInfrastructureError` for a transient
+infrastructure fault that is safe to retry within the same declared ML attempt.
+
+Durable history and recovery are available when an operator needs them:
+
+```python
+checkpoints = loop.history("experiment-001")
+state = loop.recover(plan, "experiment-001", checkpoints[-2].checkpoint_id)
+```
+
+History is chronological and read-only. Recovery is deliberately explicit: it
+branches from the selected checkpoint after verifying run and plan identity,
+then resumes with the same synchronous durability. The framework never rewinds
+a scientific campaign automatically.
+
 The replaceable seams are `StageAdapter`, `GateAdapter`, `ReasoningAdapter`,
 `RunStore`, `SkillBootstrapper`, and `AdapterRegistry`. Training libraries and
 model-specific decisions remain behind those seams. See [CONTEXT.md](CONTEXT.md)

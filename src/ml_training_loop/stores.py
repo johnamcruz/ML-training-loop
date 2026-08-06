@@ -5,11 +5,47 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import sqlite3
+from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from .domain import Decision, GateResult, Phase, Revision, RunState, StageReceipt
+
+
+def run_state_from_payload(raw: dict[str, Any]) -> RunState:
+    """Hydrate the immutable domain state from primitive checkpoint data."""
+
+    gate = raw.get("last_gate")
+    return RunState(
+        run_id=raw["run_id"],
+        plan_identity=raw["plan_identity"],
+        phase=Phase(raw["phase"]),
+        stage_index=int(raw["stage_index"]),
+        attempts={key: int(value) for key, value in raw["attempts"].items()},
+        receipts=tuple(StageReceipt(**item) for item in raw["receipts"]),
+        revisions=tuple(Revision(**item) for item in raw["revisions"]),
+        last_gate=(
+            None
+            if gate is None
+            else GateResult(
+                decision=Decision(gate["decision"]),
+                reason=gate["reason"],
+                evidence=gate.get("evidence", {}),
+            )
+        ),
+        message=raw.get("message", ""),
+    )
+
+
+def run_state_to_payload(state: RunState) -> dict[str, Any]:
+    """Serialize domain state to strict-msgpack-safe primitive data."""
+
+    payload = asdict(state)
+    payload["phase"] = state.phase.value
+    if state.last_gate is not None:
+        payload["last_gate"]["decision"] = state.last_gate.decision.value
+    return payload
 
 
 class InMemoryRunStore:
@@ -39,35 +75,12 @@ class JsonRunStore:
         path = self._path(run_id)
         if not path.is_file():
             return None
-        raw = json.loads(path.read_text())
-        gate = raw.get("last_gate")
-        return RunState(
-            run_id=raw["run_id"],
-            plan_identity=raw["plan_identity"],
-            phase=Phase(raw["phase"]),
-            stage_index=int(raw["stage_index"]),
-            attempts={key: int(value) for key, value in raw["attempts"].items()},
-            receipts=tuple(StageReceipt(**item) for item in raw["receipts"]),
-            revisions=tuple(Revision(**item) for item in raw["revisions"]),
-            last_gate=(
-                None
-                if gate is None
-                else GateResult(
-                    decision=Decision(gate["decision"]),
-                    reason=gate["reason"],
-                    evidence=gate.get("evidence", {}),
-                )
-            ),
-            message=raw.get("message", ""),
-        )
+        return run_state_from_payload(json.loads(path.read_text()))
 
     def save(self, state: RunState) -> None:
         path = self._path(state.run_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = asdict(state)
-        payload["phase"] = state.phase.value
-        if state.last_gate is not None:
-            payload["last_gate"]["decision"] = state.last_gate.decision.value
+        payload = run_state_to_payload(state)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(
             json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"

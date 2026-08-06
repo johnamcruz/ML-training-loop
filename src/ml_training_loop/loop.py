@@ -2,18 +2,20 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Literal, Mapping, TypedDict
+from typing import Any, Literal, Mapping, TypedDict
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, RetryPolicy, interrupt
 
 from .domain import (
     Decision,
     Phase,
     ReasoningOutcome,
+    RetryableInfrastructureError,
     Revision,
+    RunCheckpoint,
     RunState,
     StageReceipt,
     TrainingPlan,
@@ -28,12 +30,14 @@ from .interfaces import (
     StageRequest,
 )
 from .skills import FOUNDATION_SKILLS
+from .stores import run_state_from_payload, run_state_to_payload
 
 
 class _GraphState(TypedDict):
     """Stable primitive checkpoint state owned by LangGraph."""
 
     run_id: str
+    run_state: dict[str, Any]
 
 
 _Route = Literal["execute", "validate", "reason", "__end__"]
@@ -97,8 +101,8 @@ class TrainingLoop:
             else:
                 graph_input = None
         else:
-            graph_input = {"run_id": run_id}
-        self._graph.invoke(graph_input, config=config)
+            graph_input = self._graph_state(state)
+        self._graph.invoke(graph_input, config=config, durability="sync")
         result = self._store.load(run_id)
         if result is None:
             raise RuntimeError("LangGraph completed without durable run state")
@@ -107,12 +111,96 @@ class TrainingLoop:
     def status(self, run_id: str) -> RunState | None:
         return self._store.load(run_id)
 
+    def history(self, run_id: str) -> tuple[RunCheckpoint, ...]:
+        """Return durable execution history in chronological order."""
+
+        snapshots = self._graph.get_state_history(self._config(run_id))
+        checkpoints = []
+        for snapshot in snapshots:
+            payload = snapshot.values.get("run_state") if snapshot.values else None
+            checkpoint_id = snapshot.config.get("configurable", {}).get(
+                "checkpoint_id"
+            )
+            if (
+                payload is None
+                or checkpoint_id is None
+                or snapshot.created_at is None
+            ):
+                continue
+            checkpoints.append(RunCheckpoint(
+                checkpoint_id=checkpoint_id,
+                created_at=snapshot.created_at,
+                next_nodes=tuple(snapshot.next),
+                state=run_state_from_payload(payload),
+            ))
+        return tuple(reversed(checkpoints))
+
+    def recover(
+        self,
+        plan: TrainingPlan,
+        run_id: str,
+        checkpoint_id: str,
+    ) -> RunState:
+        """Explicitly branch and resume from one inspected durable checkpoint."""
+
+        current = self._store.load(run_id)
+        if current is None:
+            raise ValueError("run id has no durable training state")
+        if current.plan_identity != plan.identity:
+            raise ValueError("run id belongs to a different training plan")
+        snapshot = next(
+            (
+                item
+                for item in self._graph.get_state_history(self._config(run_id))
+                if item.config.get("configurable", {}).get("checkpoint_id")
+                == checkpoint_id
+            ),
+            None,
+        )
+        if snapshot is None:
+            raise ValueError("checkpoint does not belong to this run")
+        payload = snapshot.values.get("run_state") if snapshot.values else None
+        if payload is None:
+            raise ValueError("checkpoint predates recoverable domain state")
+        recovered = run_state_from_payload(payload)
+        if recovered.plan_identity != plan.identity or recovered.run_id != run_id:
+            raise ValueError("checkpoint identity does not match the training plan")
+
+        self._plans[run_id] = plan
+        self._store.save(recovered)
+        if recovered.phase is Phase.NEEDS_REASONING:
+            if self._reasoning is None:
+                return recovered
+            graph_input = Command(resume={"action": "reason"})
+        else:
+            graph_input = None
+        recovery_config = {
+            **snapshot.config,
+            "recursion_limit": self._recursion_limit(plan),
+        }
+        self._graph.invoke(
+            graph_input,
+            config=recovery_config,
+            durability="sync",
+        )
+        result = self._store.load(run_id)
+        if result is None:
+            raise RuntimeError("LangGraph recovery lost durable run state")
+        return result
+
     def _compile_graph(self):
         graph = StateGraph(_GraphState)
-        graph.add_node("bootstrap", self._bootstrap)
-        graph.add_node("execute", self._execute)
-        graph.add_node("validate", self._validate)
-        graph.add_node("reason", self._reason)
+        retry = RetryPolicy(
+            initial_interval=0.1,
+            max_interval=1.0,
+            max_attempts=3,
+            jitter=False,
+            retry_on=RetryableInfrastructureError,
+        )
+        graph.add_node("bootstrap", self._bootstrap, retry_policy=retry)
+        graph.add_node("execute", self._execute, retry_policy=retry)
+        graph.add_node("validate", self._validate, retry_policy=retry)
+        graph.add_node("reason", self._reason, retry_policy=retry)
         graph.add_edge(START, "bootstrap")
         graph.add_conditional_edges("bootstrap", self._route)
         graph.add_conditional_edges("execute", self._route)
@@ -140,7 +228,7 @@ class TrainingLoop:
             )
         elif not state.terminal and state.stage_index >= len(plan.stages):
             state = self._finish(state, Phase.COMPLETE, "all stages proceeded")
-        return graph
+        return self._graph_state(state)
 
     def _execute(self, graph: _GraphState) -> _GraphState:
         plan, state = self._context(graph)
@@ -160,13 +248,15 @@ class TrainingLoop:
                     config_override=override,
                 )
             )
+        except RetryableInfrastructureError:
+            raise
         except Exception as error:
             state = self._finish(
                 state,
                 Phase.BLOCKED,
                 f"stage {stage.name} failed: {type(error).__name__}: {error}",
             )
-            return graph
+            return self._graph_state(state)
 
         if (
             receipt.stage != stage.name
@@ -178,7 +268,7 @@ class TrainingLoop:
                 Phase.BLOCKED,
                 f"stage {stage.name} returned an invalid receipt",
             )
-            return graph
+            return self._graph_state(state)
 
         state = replace(
             state,
@@ -188,7 +278,7 @@ class TrainingLoop:
             last_gate=None,
         )
         self._store.save(state)
-        return graph
+        return self._graph_state(state)
 
     def _validate(self, graph: _GraphState) -> _GraphState:
         plan, state = self._context(graph)
@@ -200,7 +290,7 @@ class TrainingLoop:
                 Phase.BLOCKED,
                 f"stage {stage.name} validation lacks a completed receipt",
             )
-            return graph
+            return self._graph_state(state)
 
         gate = state.last_gate
         if gate is None:
@@ -214,6 +304,8 @@ class TrainingLoop:
                         prior_receipts=state.receipts[:-1],
                     )
                 )
+            except RetryableInfrastructureError:
+                raise
             except Exception as error:
                 state = self._finish(
                     state,
@@ -221,7 +313,7 @@ class TrainingLoop:
                     f"gate {stage.gate_adapter} failed: "
                     f"{type(error).__name__}: {error}",
                 )
-                return graph
+                return self._graph_state(state)
             state = replace(state, last_gate=gate)
             self._store.save(state)
 
@@ -252,7 +344,7 @@ class TrainingLoop:
                 message=gate.reason,
             )
             self._store.save(state)
-        return graph
+        return self._graph_state(state)
 
     def _reason(self, graph: _GraphState) -> _GraphState:
         plan, state = self._context(graph)
@@ -265,7 +357,7 @@ class TrainingLoop:
                 Phase.BLOCKED,
                 "reasoning checkpoint lacks a valid receipt or REVISE gate",
             )
-            return graph
+            return self._graph_state(state)
 
         revisions = sum(item.stage == stage.name for item in state.revisions)
         if revisions >= plan.max_revisions_per_stage:
@@ -274,7 +366,7 @@ class TrainingLoop:
                 Phase.FAILED_GATE,
                 f"stage {stage.name} exhausted its controlled revisions",
             )
-            return graph
+            return self._graph_state(state)
         if self._reasoning is None:
             interrupt({
                 "run_id": state.run_id,
@@ -282,7 +374,7 @@ class TrainingLoop:
                 "reason": gate.reason,
                 "revision_number": revisions + 1,
             })
-            return graph
+            return self._graph_state(state)
 
         try:
             reasoned = self._reasoning.revise(
@@ -305,13 +397,15 @@ class TrainingLoop:
                     ),
                 )
             )
+        except RetryableInfrastructureError:
+            raise
         except Exception as error:
             state = self._finish(
                 state,
                 Phase.BLOCKED,
                 f"reasoning adapter failed: {type(error).__name__}: {error}",
             )
-            return graph
+            return self._graph_state(state)
 
         if reasoned is None:
             state = self._finish(
@@ -319,14 +413,14 @@ class TrainingLoop:
                 Phase.STOPPED,
                 "reasoning adapter declined a further revision",
             )
-            return graph
+            return self._graph_state(state)
         if isinstance(reasoned, ReasoningOutcome):
             if reasoned.decision is Decision.STOP:
                 state = self._finish(state, Phase.STOPPED, reasoned.rationale)
-                return graph
+                return self._graph_state(state)
             if reasoned.decision is Decision.BLOCKED:
                 state = self._finish(state, Phase.BLOCKED, reasoned.rationale)
-                return graph
+                return self._graph_state(state)
             revision = reasoned.revision
             if revision is None:
                 state = self._finish(
@@ -334,7 +428,7 @@ class TrainingLoop:
                     Phase.BLOCKED,
                     "REVISE reasoning outcome omitted its revision",
                 )
-                return graph
+                return self._graph_state(state)
         elif isinstance(reasoned, Revision):
             revision = reasoned
         else:
@@ -343,7 +437,7 @@ class TrainingLoop:
                 Phase.BLOCKED,
                 "reasoning adapter returned an unsupported outcome",
             )
-            return graph
+            return self._graph_state(state)
 
         if revision.stage != stage.name:
             state = self._finish(
@@ -351,7 +445,7 @@ class TrainingLoop:
                 Phase.BLOCKED,
                 "reasoning adapter attempted to revise a different stage",
             )
-            return graph
+            return self._graph_state(state)
 
         state = replace(
             state,
@@ -361,7 +455,7 @@ class TrainingLoop:
             message=revision.rationale,
         )
         self._store.save(state)
-        return graph
+        return self._graph_state(state)
 
     def _route(self, graph: _GraphState) -> _Route:
         _, state = self._context(graph)
@@ -379,10 +473,26 @@ class TrainingLoop:
             plan = self._plans[run_id]
         except KeyError as error:
             raise RuntimeError(f"training plan is unavailable for run {run_id}") from error
-        state = self._store.load(run_id)
+        payload = graph.get("run_state")
+        state = (
+            run_state_from_payload(payload)
+            if payload is not None
+            else self._store.load(run_id)
+        )
         if state is None:
             raise RuntimeError(f"durable state is unavailable for run {run_id}")
         return plan, state
+
+    @staticmethod
+    def _graph_state(state: RunState) -> _GraphState:
+        return {
+            "run_id": state.run_id,
+            "run_state": run_state_to_payload(state),
+        }
+
+    @staticmethod
+    def _config(run_id: str) -> dict:
+        return {"configurable": {"thread_id": run_id}}
 
     @staticmethod
     def _recursion_limit(plan: TrainingPlan) -> int:
