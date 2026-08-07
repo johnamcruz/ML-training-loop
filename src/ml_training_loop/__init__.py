@@ -11,8 +11,10 @@ from .domain import (
     RunState,
     StageReceipt,
     StageSpec,
+    SurrogateAdvice,
     TrainingPlan,
 )
+from .interfaces import SurrogateAdvisor, SurrogateRequest
 from .loop import TrainingLoop
 
 __all__ = [
@@ -26,6 +28,9 @@ __all__ = [
     "RunState",
     "StageReceipt",
     "StageSpec",
+    "SurrogateAdvice",
+    "SurrogateAdvisor",
+    "SurrogateRequest",
     "TrainingLoop",
     "TrainingPlan",
 ]

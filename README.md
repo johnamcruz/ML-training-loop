@@ -15,16 +15,19 @@ future workflows plug in through the same small adapter interfaces.
 bootstrap required ML skills
             |
             v
-      execute stage <------------------+
-            |                           |
-            v                           |
-       evaluate gate                    |
-            |                           |
-     +------+------+------+             |
-     |             |      |             |
-  PROCEED        REVISE  STOP/BLOCKED   |
-     |             |                    |
- next stage   diagnose and authorize ---+
+      execute stage <--------------------------+
+            |                                   |
+            v                                   |
+       evaluate gate                            |
+            |                                   |
+     +------+------+------+                     |
+     |             |      |                     |
+  PROCEED        REVISE  STOP/BLOCKED           |
+     |             |                            |
+ next stage   optional surrogate advice         |
+                   |                            |
+                   v                            |
+             diagnose and authorize ------------+
 ```
 
 `PROCEED`, `REVISE`, `STOP`, and `BLOCKED` are separate decisions. LangGraph
@@ -58,6 +61,7 @@ loop = TrainingLoop(
     store=JsonRunStore(Path(".ml-training-loop/runs")),
     skills=BundledSkillBootstrapper(Path("path/to/bundled_skills")),
     reasoning=my_reasoning_adapter,
+    surrogate=my_optional_surrogate_advisor,
 )
 state = loop.run(plan, run_id="experiment-001")
 ```
@@ -81,9 +85,37 @@ then resumes with the same synchronous durability. The framework never rewinds
 a scientific campaign automatically.
 
 The replaceable seams are `StageAdapter`, `GateAdapter`, `ReasoningAdapter`,
-`RunStore`, `SkillBootstrapper`, and `AdapterRegistry`. Training libraries and
-model-specific decisions remain behind those seams. See [CONTEXT.md](CONTEXT.md)
-for the domain boundary.
+`SurrogateAdvisor`, `RunStore`, `SkillBootstrapper`, and `AdapterRegistry`.
+Training libraries and model-specific decisions remain behind those seams. See
+[CONTEXT.md](CONTEXT.md) for the domain boundary.
+
+### Optional surrogate-augmented reasoning
+
+At a `REVISE` checkpoint, a host may inject a `SurrogateAdvisor`. It receives
+the immutable training plan, current receipt and gate, complete prior receipt
+ledger, prior revisions, and effective configuration. It returns structured
+`SurrogateAdvice`: a backend identity, diagnostics, candidate proposals, and
+supporting evidence. The training loop authenticates that finite JSON payload
+inside the reasoning request.
+
+The advisor is deliberately read-only. It cannot execute training, mutate the
+plan, select a proposal, or authorize a revision. The reasoning adapter may
+accept, refine, or reject its proposals, and the host's existing revision
+validator remains the final authority. Omitting the advisor preserves the
+existing workflow exactly. A configured advisor that errors or returns a
+malformed payload fails closed before reasoning.
+
+This seam is inspired by *Agentic Bayesian Optimization through
+Surrogate-Augmented Autoresearch* (Brunzema et al., 2026), which places a
+reasoning agent in control while a Bayesian backend supplies uncertainty-aware
+diagnostics and proposals:
+
+https://arxiv.org/abs/2608.00316
+
+The core package does not depend on BoTorch or Optuna. Hosts may implement the
+same seam with a Gaussian-process backend, Optuna ask/tell, or a deterministic
+fake. Search-space definitions and probabilistic modeling remain optional
+integration concerns rather than orchestration dependencies.
 
 ### Unattended Codex reasoning
 

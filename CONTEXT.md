@@ -21,6 +21,9 @@ not training algorithms.
   adapter may authorize one controlled revision.
 - **Reasoning outcome**: one provider-neutral `REVISE`, `STOP`, or `BLOCKED`
   disposition. Only `REVISE` carries a host-validated configuration override.
+- **Surrogate advice**: optional read-only diagnostics and candidate proposals
+  derived from the authenticated trial ledger. Advice informs reasoning but
+  never authorizes or executes a revision.
 - **Run state**: the durable state-machine snapshot used to resume without
   repeating completed work.
 - **Profile**: a future host-owned assembly of adapters for a model family such
@@ -34,6 +37,11 @@ nodes that apply those policies. LangGraph owns transition execution,
 checkpointing, routing, and interruption-safe resume. Hosts own datasets,
 trainers, evaluators, model-specific metrics, compute environments,
 notifications, and promotion policy through adapters.
+
+An optional surrogate advisor may inspect receipts, gate evidence, and prior
+revisions at a reasoning checkpoint. The core authenticates its structured
+advice into the reasoning request. Hosts own the optimization implementation,
+search space, posterior model, and interpretation of model-family metrics.
 
 The core must not import PyTorch, an RL framework, a data platform, or a model
 provider. A host may use any of them behind an adapter.

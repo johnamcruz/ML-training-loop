@@ -14,6 +14,7 @@ from ml_training_loop import (
     RunState,
     StageReceipt,
     StageSpec,
+    SurrogateAdvice,
     TrainingLoop,
     TrainingPlan,
 )
@@ -90,6 +91,20 @@ class OneRevisionReasoner:
         )
 
 
+class RecordingSurrogate:
+    def __init__(self):
+        self.requests = []
+
+    def advise(self, request):
+        self.requests.append(request)
+        return SurrogateAdvice(
+            backend="fake-bayesian-surrogate",
+            diagnostics={"cross_validated_r2": 0.71},
+            proposals=({"budget": 7}, {"learning_rate": 0.001}),
+            evidence={"trial_count": len(request.prior_receipts)},
+        )
+
+
 def plan(*stages, revisions=1):
     return TrainingPlan(
         name="generic-test",
@@ -99,6 +114,87 @@ def plan(*stages, revisions=1):
 
 
 class TrainingLoopTests(unittest.TestCase):
+    def test_surrogate_advice_rejects_malformed_backend_payloads(self):
+        with self.assertRaisesRegex(ValueError, "backend identity"):
+            SurrogateAdvice(backend=7)
+        with self.assertRaisesRegex(ValueError, "proposal"):
+            SurrogateAdvice(
+                backend="fake-bayesian-surrogate",
+                proposals=("not-a-json-object",),
+            )
+
+    def test_optional_surrogate_advises_reasoning_from_the_trial_ledger(self):
+        events = []
+        stage = ScoreStage(events, [0.4, 0.9])
+        reasoner = OneRevisionReasoner()
+        surrogate = RecordingSurrogate()
+        training_plan = plan(StageSpec("train", "fit", "quality"))
+
+        result = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": stage}, gates={"quality": ThresholdGate(events)}
+            ),
+            store=InMemoryRunStore(),
+            skills=RecordingSkills(events),
+            reasoning=reasoner,
+            surrogate=surrogate,
+        ).run(training_plan, "surrogate-run")
+
+        self.assertEqual(result.phase, Phase.COMPLETE)
+        self.assertEqual(len(surrogate.requests), 1)
+        request = surrogate.requests[0]
+        self.assertEqual(request.plan.identity, training_plan.identity)
+        self.assertEqual(request.prior_receipts, result.receipts[:1])
+        self.assertEqual(request.gate.evidence, {"score": 0.4})
+        advice = reasoner.requests[0].surrogate_advice
+        self.assertEqual(advice.backend, "fake-bayesian-surrogate")
+        self.assertEqual(advice.proposals[0], {"budget": 7})
+        self.assertEqual(stage.requests[-1].config_override, {"budget": 2})
+
+    def test_configured_surrogate_failure_blocks_before_reasoning(self):
+        class BrokenSurrogate:
+            def advise(self, request):
+                raise RuntimeError("surrogate posterior is unavailable")
+
+        events = []
+        reasoner = OneRevisionReasoner()
+        result = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": ScoreStage(events, [0.4])},
+                gates={"quality": ThresholdGate(events)},
+            ),
+            store=InMemoryRunStore(),
+            skills=RecordingSkills(events),
+            reasoning=reasoner,
+            surrogate=BrokenSurrogate(),
+        ).run(plan(StageSpec("train", "fit", "quality")), "bad-surrogate")
+
+        self.assertEqual(result.phase, Phase.BLOCKED)
+        self.assertIn("surrogate advisor failed", result.message)
+        self.assertEqual(reasoner.requests, [])
+
+    def test_configured_surrogate_must_return_structured_advice(self):
+        class InvalidSurrogate:
+            def advise(self, request):
+                return {"proposal": {"budget": 2}}
+
+        events = []
+        reasoner = OneRevisionReasoner()
+        result = TrainingLoop(
+            adapters=DictAdapterRegistry(
+                stages={"fit": ScoreStage(events, [0.4])},
+                gates={"quality": ThresholdGate(events)},
+            ),
+            store=InMemoryRunStore(),
+            skills=RecordingSkills(events),
+            reasoning=reasoner,
+            surrogate=InvalidSurrogate(),
+        ).run(plan(StageSpec("train", "fit", "quality")), "invalid-surrogate")
+
+        self.assertEqual(result.phase, Phase.BLOCKED)
+        self.assertIn("invalid advice", result.message)
+        self.assertEqual(reasoner.requests, [])
+
     def test_retryable_infrastructure_failure_retries_without_new_attempt(self):
         class TransientStage:
             def __init__(self):

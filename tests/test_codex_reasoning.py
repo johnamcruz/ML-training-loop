@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
 import unittest
 
-from ml_training_loop import Decision, GateResult, StageReceipt, StageSpec, TrainingPlan
+from ml_training_loop import (
+    Decision,
+    GateResult,
+    StageReceipt,
+    StageSpec,
+    SurrogateAdvice,
+    TrainingPlan,
+)
 from ml_training_loop.interfaces import ReasoningRequest
 from ml_training_loop.integrations.reasoning import (
     ClaudeCliReasoningAdapter,
@@ -65,6 +73,45 @@ def reasoning_request() -> ReasoningRequest:
 
 
 class CodexCliReasoningAdapterTests(unittest.TestCase):
+    def test_surrogate_advice_is_authenticated_in_the_codex_evidence(self):
+        executor = FakeCodexExecutor({
+            "decision": "STOP",
+            "rationale": "the proposed region is not causally admissible",
+            "config_override_json": "{}",
+        })
+        request = replace(
+            reasoning_request(),
+            surrogate_advice=SurrogateAdvice(
+                backend="fake-bayesian-surrogate",
+                diagnostics={"cross_validated_r2": 0.71},
+                proposals=({"learning_rate": 0.001},),
+                evidence={"trial_count": 6},
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            adapter = CodexCliReasoningAdapter(
+                repository_root=Path(temporary),
+                receipt_root=Path(temporary) / "reasoning",
+                prompt_builder=lambda value: "Keep the temporal contract frozen.",
+                revision_validator=lambda revision: None,
+                executor=executor,
+            )
+
+            adapter.revise(request)
+
+            prompt = executor.requests[0].prompt
+            self.assertIn("fake-bayesian-surrogate", prompt)
+            self.assertIn("cross_validated_r2", prompt)
+            saved = json.loads(next(
+                (Path(temporary) / "reasoning").glob(
+                    "campaign-1/entry/revision-1/invocation-*/request.json"
+                )
+            ).read_text())
+            self.assertEqual(
+                saved["evidence"]["surrogate_advice"]["evidence"]["trial_count"],
+                6,
+            )
+
     def test_authorizes_one_structured_revision_and_persists_receipt(self):
         executor = FakeCodexExecutor({
             "decision": "REVISE",

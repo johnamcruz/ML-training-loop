@@ -134,6 +134,41 @@ class ReasoningOutcome:
 
 
 @dataclass(frozen=True)
+class SurrogateAdvice:
+    """Read-only diagnostics and proposals from an optimization backend."""
+
+    backend: str
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    proposals: tuple[Mapping[str, Any], ...] = ()
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.backend, str) or not self.backend.strip():
+            raise ValueError("surrogate advice requires a backend identity")
+        if not isinstance(self.diagnostics, Mapping):
+            raise ValueError("surrogate diagnostics must be a JSON object")
+        if not isinstance(self.evidence, Mapping):
+            raise ValueError("surrogate evidence must be a JSON object")
+        if not isinstance(self.proposals, tuple) or any(
+            not isinstance(proposal, Mapping) for proposal in self.proposals
+        ):
+            raise ValueError("each surrogate proposal must be a JSON object")
+        try:
+            json.dumps(
+                {
+                    "backend": self.backend,
+                    "diagnostics": self.diagnostics,
+                    "proposals": self.proposals,
+                    "evidence": self.evidence,
+                },
+                sort_keys=True,
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError("surrogate advice must be finite JSON data") from error
+
+
+@dataclass(frozen=True)
 class SkillStatus:
     name: str
     status: str

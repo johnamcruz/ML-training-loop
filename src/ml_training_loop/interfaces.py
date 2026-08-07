@@ -12,6 +12,7 @@ from .domain import (
     SkillBootstrapReceipt,
     StageReceipt,
     StageSpec,
+    SurrogateAdvice,
     TrainingPlan,
 )
 
@@ -46,6 +47,20 @@ class ReasoningRequest:
     required_skills: tuple[str, ...]
     prior_revisions: tuple[Revision, ...] = ()
     effective_config_override: Mapping[str, Any] = field(default_factory=dict)
+    surrogate_advice: SurrogateAdvice | None = None
+
+
+@dataclass(frozen=True)
+class SurrogateRequest:
+    run_id: str
+    plan: TrainingPlan
+    stage: StageSpec
+    receipt: StageReceipt
+    gate: GateResult
+    revision_number: int
+    prior_receipts: tuple[StageReceipt, ...]
+    prior_revisions: tuple[Revision, ...] = ()
+    effective_config_override: Mapping[str, Any] = field(default_factory=dict)
 
 
 class StageAdapter(Protocol):
@@ -60,6 +75,10 @@ class ReasoningAdapter(Protocol):
     def revise(
         self, request: ReasoningRequest
     ) -> ReasoningOutcome | Revision | None: ...
+
+
+class SurrogateAdvisor(Protocol):
+    def advise(self, request: SurrogateRequest) -> SurrogateAdvice | None: ...
 
 
 class SkillBootstrapper(Protocol):

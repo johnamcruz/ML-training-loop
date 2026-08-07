@@ -18,6 +18,7 @@ from .domain import (
     RunCheckpoint,
     RunState,
     StageReceipt,
+    SurrogateAdvice,
     TrainingPlan,
 )
 from .interfaces import (
@@ -28,6 +29,8 @@ from .interfaces import (
     RunStore,
     SkillBootstrapper,
     StageRequest,
+    SurrogateAdvisor,
+    SurrogateRequest,
 )
 from .skills import FOUNDATION_SKILLS
 from .stores import run_state_from_payload, run_state_to_payload
@@ -58,12 +61,14 @@ class TrainingLoop:
         store: RunStore,
         skills: SkillBootstrapper,
         reasoning: ReasoningAdapter | None = None,
+        surrogate: SurrogateAdvisor | None = None,
         baseline_skills: tuple[str, ...] = FOUNDATION_SKILLS,
     ) -> None:
         self._adapters = adapters
         self._store = store
         self._skills = skills
         self._reasoning = reasoning
+        self._surrogate = surrogate
         self._baseline_skills = baseline_skills
         self._plans: dict[str, TrainingPlan] = {}
         checkpointer_factory = getattr(store, "_langgraph_checkpointer", None)
@@ -376,6 +381,39 @@ class TrainingLoop:
             })
             return self._graph_state(state)
 
+        surrogate_advice = None
+        if self._surrogate is not None:
+            try:
+                surrogate_advice = self._surrogate.advise(SurrogateRequest(
+                    run_id=state.run_id,
+                    plan=plan,
+                    stage=stage,
+                    receipt=receipt,
+                    gate=gate,
+                    revision_number=revisions + 1,
+                    prior_receipts=state.receipts,
+                    prior_revisions=state.revisions,
+                    effective_config_override=self._override_for(
+                        state.revisions, stage.name
+                    ),
+                ))
+                if (
+                    surrogate_advice is not None
+                    and not isinstance(surrogate_advice, SurrogateAdvice)
+                ):
+                    raise TypeError(
+                        "surrogate advisor returned invalid advice"
+                    )
+            except RetryableInfrastructureError:
+                raise
+            except Exception as error:
+                state = self._finish(
+                    state,
+                    Phase.BLOCKED,
+                    f"surrogate advisor failed: {type(error).__name__}: {error}",
+                )
+                return self._graph_state(state)
+
         try:
             reasoned = self._reasoning.revise(
                 ReasoningRequest(
@@ -395,6 +433,7 @@ class TrainingLoop:
                     effective_config_override=self._override_for(
                         state.revisions, stage.name
                     ),
+                    surrogate_advice=surrogate_advice,
                 )
             )
         except RetryableInfrastructureError:
