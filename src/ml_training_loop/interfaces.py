@@ -15,6 +15,7 @@ from .domain import (
     SurrogateAdvice,
     TrainingPlan,
 )
+from .ledger import ExperimentLedger
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class ReasoningRequest:
     prior_revisions: tuple[Revision, ...] = ()
     effective_config_override: Mapping[str, Any] = field(default_factory=dict)
     surrogate_advice: SurrogateAdvice | None = None
+    experiment_ledger: ExperimentLedger | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,7 @@ class SurrogateRequest:
     prior_receipts: tuple[StageReceipt, ...]
     prior_revisions: tuple[Revision, ...] = ()
     effective_config_override: Mapping[str, Any] = field(default_factory=dict)
+    experiment_ledger: ExperimentLedger | None = None
 
 
 class StageAdapter(Protocol):

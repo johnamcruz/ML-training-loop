@@ -8,7 +8,10 @@ import unittest
 
 from ml_training_loop import (
     Decision,
+    ExperimentLedger,
     GateResult,
+    Phase,
+    RunState,
     StageReceipt,
     StageSpec,
     SurrogateAdvice,
@@ -73,6 +76,45 @@ def reasoning_request() -> ReasoningRequest:
 
 
 class CodexCliReasoningAdapterTests(unittest.TestCase):
+    def test_experiment_ledger_is_authenticated_in_the_codex_evidence(self):
+        executor = FakeCodexExecutor({
+            "decision": "STOP",
+            "rationale": "the tested family is falsified",
+            "config_override_json": "{}",
+        })
+        request = reasoning_request()
+        ledger = ExperimentLedger.from_run_state(RunState(
+            run_id=request.run_id,
+            plan_identity=request.plan.identity,
+            phase=Phase.NEEDS_REASONING,
+            receipts=(request.receipt,),
+        ))
+        request = replace(request, experiment_ledger=ledger)
+        with tempfile.TemporaryDirectory() as temporary:
+            adapter = CodexCliReasoningAdapter(
+                repository_root=Path(temporary),
+                receipt_root=Path(temporary) / "reasoning",
+                prompt_builder=lambda value: "Use the complete experiment history.",
+                revision_validator=lambda revision: None,
+                executor=executor,
+            )
+
+            adapter.revise(request)
+
+            saved = json.loads(next(
+                (Path(temporary) / "reasoning").glob(
+                    "campaign-1/entry/revision-1/invocation-*/request.json"
+                )
+            ).read_text())
+            self.assertEqual(
+                saved["evidence"]["experiment_ledger"]["identity"],
+                ledger.identity,
+            )
+            self.assertEqual(
+                saved["evidence"]["experiment_ledger"]["entries"][0]["stage"],
+                "entry",
+            )
+
     def test_surrogate_advice_is_authenticated_in_the_codex_evidence(self):
         executor = FakeCodexExecutor({
             "decision": "STOP",

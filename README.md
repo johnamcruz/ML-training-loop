@@ -89,6 +89,40 @@ The replaceable seams are `StageAdapter`, `GateAdapter`, `ReasoningAdapter`,
 Training libraries and model-specific decisions remain behind those seams. See
 [CONTEXT.md](CONTEXT.md) for the domain boundary.
 
+### Portable artifact evidence and experiment history
+
+The shared package authenticates files, JSON reports, and model directories
+without knowing what produced them. An `ArtifactContract` may require a digest,
+specific JSON identity fields, or files inside a directory. The resulting
+snapshot can be written directly into a stage receipt:
+
+```python
+from pathlib import Path
+
+from ml_training_loop import ArtifactContract, ArtifactKind, inspect_artifacts
+
+snapshot = inspect_artifacts((ArtifactContract(
+    path=Path("artifacts/report.json"),
+    kind=ArtifactKind.JSON,
+    expected={"identity.dataset": "dataset-v3"},
+),))
+if not snapshot.ready:
+    raise RuntimeError(snapshot.failures)
+
+receipt_outputs = {
+    "artifact_evidence": snapshot.receipt_evidence,
+    "metrics": host_owned_metrics,
+}
+```
+
+`ExperimentLedger.from_run_state(state)` then reconstructs a deterministic
+history of baseline and revised attempts while preserving receipt outputs and
+artifact hashes. FFM may interpret those outputs as SSL and Probe Atlas
+evidence, FFM Strategies as temporal/economic evidence, and an RL host as
+study, gauntlet, or model-bundle evidence. Those interpretations remain in the
+host repositories; the shared ledger contains no model-family or trading
+schema.
+
 ### Optional surrogate-augmented reasoning
 
 At a `REVISE` checkpoint, a host may inject a `SurrogateAdvisor`. It receives
