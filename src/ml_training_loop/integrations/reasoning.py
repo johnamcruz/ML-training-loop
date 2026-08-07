@@ -411,6 +411,37 @@ def _evidence_envelope(request: ReasoningRequest) -> dict:
             }
             for revision in request.prior_revisions
         ],
+        "experiment_ledger": (
+            {
+                "identity": request.experiment_ledger.identity,
+                "entries": [
+                    {
+                        "run_id": entry.run_id,
+                        "plan_identity": entry.plan_identity,
+                        "stage": entry.stage,
+                        "attempt": entry.attempt,
+                        "status": entry.status,
+                        "revision": (
+                            _revision_payload(entry.revision)
+                            if entry.revision is not None
+                            else None
+                        ),
+                        "outputs": _redact(entry.outputs),
+                        "artifacts": [
+                            {
+                                "path": artifact.path,
+                                "kind": artifact.kind.value,
+                                "sha256": artifact.sha256,
+                            }
+                            for artifact in entry.artifacts
+                        ],
+                    }
+                    for entry in request.experiment_ledger.entries
+                ],
+            }
+            if request.experiment_ledger is not None
+            else None
+        ),
         "surrogate_advice": (
             {
                 "backend": request.surrogate_advice.backend,

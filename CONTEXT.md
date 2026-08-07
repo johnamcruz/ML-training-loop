@@ -13,6 +13,14 @@ not training algorithms.
   data, fitting a model, evaluating it, or packaging an accepted candidate.
 - **Receipt**: immutable evidence that a stage attempt completed and the outputs
   it produced. A receipt is not a claim that the quality gate passed.
+- **Artifact contract**: a model-independent declaration of the path, kind,
+  required contents, identity fields, and optional expected digest that an
+  output must satisfy before it may be trusted or reused.
+- **Artifact snapshot**: the authenticated SHA-256 evidence and explicit
+  failures produced by inspecting one or more artifact contracts.
+- **Experiment ledger**: a deterministic view of every completed attempt,
+  its effective revision, receipt outputs, and authenticated artifact evidence.
+  Hosts interpret their own metrics; the ledger does not.
 - **Gate**: an adapter that evaluates one receipt and returns exactly one
   decision: `PROCEED`, `REVISE`, `STOP`, or `BLOCKED`.
 - **Revision**: one evidence-backed configuration override for the current
@@ -32,11 +40,12 @@ not training algorithms.
 
 ## Ownership boundary
 
-The core owns skill bootstrapping, ML receipts, revision budgets, and the graph
-nodes that apply those policies. LangGraph owns transition execution,
-checkpointing, routing, and interruption-safe resume. Hosts own datasets,
-trainers, evaluators, model-specific metrics, compute environments,
-notifications, and promotion policy through adapters.
+The core owns skill bootstrapping, ML receipts, artifact contracts, experiment
+ledgers, revision budgets, and the graph nodes that apply those policies.
+LangGraph owns transition execution, checkpointing, routing, and
+interruption-safe resume. Hosts own datasets, trainers, evaluators,
+model-specific metrics, compute environments, notifications, and promotion
+policy through adapters.
 
 An optional surrogate advisor may inspect receipts, gate evidence, and prior
 revisions at a reasoning checkpoint. The core authenticates its structured

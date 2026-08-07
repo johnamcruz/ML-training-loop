@@ -145,8 +145,15 @@ class TrainingLoopTests(unittest.TestCase):
         request = surrogate.requests[0]
         self.assertEqual(request.plan.identity, training_plan.identity)
         self.assertEqual(request.prior_receipts, result.receipts[:1])
+        self.assertEqual(len(request.experiment_ledger.entries), 1)
+        self.assertEqual(request.experiment_ledger.entries[0].attempt, 1)
         self.assertEqual(request.gate.evidence, {"score": 0.4})
-        advice = reasoner.requests[0].surrogate_advice
+        reasoning_request = reasoner.requests[0]
+        self.assertEqual(
+            reasoning_request.experiment_ledger.identity,
+            request.experiment_ledger.identity,
+        )
+        advice = reasoning_request.surrogate_advice
         self.assertEqual(advice.backend, "fake-bayesian-surrogate")
         self.assertEqual(advice.proposals[0], {"budget": 7})
         self.assertEqual(stage.requests[-1].config_override, {"budget": 2})

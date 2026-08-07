@@ -32,6 +32,7 @@ from .interfaces import (
     SurrogateAdvisor,
     SurrogateRequest,
 )
+from .ledger import ExperimentLedger
 from .skills import FOUNDATION_SKILLS
 from .stores import run_state_from_payload, run_state_to_payload
 
@@ -381,6 +382,16 @@ class TrainingLoop:
             })
             return self._graph_state(state)
 
+        try:
+            experiment_ledger = ExperimentLedger.from_run_state(state)
+        except (TypeError, ValueError) as error:
+            state = self._finish(
+                state,
+                Phase.BLOCKED,
+                f"experiment ledger is invalid: {error}",
+            )
+            return self._graph_state(state)
+
         surrogate_advice = None
         if self._surrogate is not None:
             try:
@@ -396,6 +407,7 @@ class TrainingLoop:
                     effective_config_override=self._override_for(
                         state.revisions, stage.name
                     ),
+                    experiment_ledger=experiment_ledger,
                 ))
                 if (
                     surrogate_advice is not None
@@ -434,6 +446,7 @@ class TrainingLoop:
                         state.revisions, stage.name
                     ),
                     surrogate_advice=surrogate_advice,
+                    experiment_ledger=experiment_ledger,
                 )
             )
         except RetryableInfrastructureError:
