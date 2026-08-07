@@ -12,12 +12,6 @@ dependencies = [
   "langgraph>=1.2,<2",
   "langgraph-checkpoint-sqlite>=3.0,<4",
 ]
-
-[project.optional-dependencies]
-test = [
-  "pytest>=8,<10",
-]
-
 license = { text = "Apache-2.0" }
 authors = [{ name = "John A. M. Cruz" }]
 classifiers = [
@@ -26,6 +20,11 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8,<10",
 ]
 
 [project.scripts]
