@@ -212,5 +212,10 @@ real public state machine without ML compute:
 python -m unittest discover -s tests -v
 ```
 
+Pushes and pull requests run the complete suite on Python 3.11 through the
+`Python Unit Tests` GitHub workflow, matching the established FFM convention.
+Repository branch protection should require its `build` check before `main`
+may be merged.
+
 Current scope is the generic orchestration foundation. Supervised and RL
 profiles will be added as adapters after the shared state machine is stable.
