@@ -212,5 +212,19 @@ real public state machine without ML compute:
 python -m unittest discover -s tests -v
 ```
 
+Pull requests run the complete suite on Python 3.11 and 3.12 through the
+`PR tests` GitHub workflow. Repository branch protection should require both
+`tests (Python 3.11)` and `tests (Python 3.12)` before `main` may be merged.
+
+To run the same gate before opening a pull request through GitHub CLI:
+
+```bash
+python scripts/create_pr.py --fill
+```
+
+The command stops before `gh pr create` when tests or bytecode compilation
+fail. GitHub still owns the authoritative merge guard because a web-created PR
+cannot execute checks until after the PR exists.
+
 Current scope is the generic orchestration foundation. Supervised and RL
 profiles will be added as adapters after the shared state machine is stable.
